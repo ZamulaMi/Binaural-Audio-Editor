@@ -120,6 +120,8 @@ export function selectOnly(id) { store.sel.clear(); if (id) store.sel.add(id); }
 export function normalizeProject(p) {
   p.loop = p.loop || { on: false, a: 0, b: 8 };
   p.markers = p.markers || [];
+  const OLD = ["#e0884a", "#4aa3d8", "#b07ad6", "#4fbf8f", "#d8607a", "#d4b13c", "#6fc7c7", "#9a9df0"];
+  p.tracks.forEach(t => { const i = OLD.indexOf(t.color); if (i >= 0) t.color = COLORS[i]; });
   p.tracks.forEach(t => {
     t.auto = t.auto || []; t.clips = t.clips || []; t.motion = t.motion || { type: "none", period: 8 };
     t.clips.forEach(c => {

@@ -106,18 +106,17 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
     g.clearRect(0, 0, W, H);
     g.fillStyle = C["--panel"]; g.fillRect(0, 0, W, H);
     p.tracks.forEach((tr, i) => {
-      g.fillStyle = tr.id === store.selTrack ? C["--panel-2"] : i % 2 ? C["--panel"] : C["--bg"];
-      g.globalAlpha = tr.id === store.selTrack ? 1 : 0.55;
+      g.fillStyle = tr.id === store.selTrack ? C["--lane-sel"] : i % 2 ? C["--lane-alt"] : C["--lane"];
       g.fillRect(HW, laneY(i), W - HW, L);
     });
-    g.globalAlpha = 1;
+    g.fillStyle = C["--lane"]; g.fillRect(HW, laneY(n), W - HW, H - laneY(n));
     // сітка
     const t0 = xt(HW), t1 = xt(W), b = 60 / p.bpm;
     if (store.rulerMode === "bars") {
       const pxBeat = b * store.zoom, every = pxBeat >= 12 ? 1 : pxBeat * 4 >= 12 ? 4 : pxBeat * 16 >= 14 ? 16 : 64;
       for (let k = Math.max(0, Math.floor(t0 / b / every) * every); k * b <= t1; k += every) {
         const x = Math.round(tx(k * b)) + 0.5;
-        g.strokeStyle = C["--line"]; g.globalAlpha = k % 4 === 0 ? 0.9 : 0.4;
+        g.strokeStyle = C["--line"]; g.globalAlpha = k % 4 === 0 ? 0.95 : 0.35;
         g.beginPath(); g.moveTo(x, RH); g.lineTo(x, H); g.stroke();
       }
     } else {
@@ -130,13 +129,13 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
     }
     g.globalAlpha = 1;
     if (p.loop.on) {
-      g.fillStyle = C["--accent"]; g.globalAlpha = 0.08;
+      g.fillStyle = C["--cycle"]; g.globalAlpha = 0.06;
       const a = Math.max(HW, tx(p.loop.a));
       g.fillRect(a, RH, Math.max(0, tx(p.loop.b) - a), H - RH);
       g.globalAlpha = 1;
     }
     // маркери крізь доріжки
-    g.setLineDash([3, 4]); g.strokeStyle = C["--accent"]; g.globalAlpha = 0.6;
+    g.setLineDash([3, 4]); g.strokeStyle = C["--marker"]; g.globalAlpha = 0.55;
     p.markers.forEach(m => { const x = Math.round(tx(m.t)) + 0.5; if (x > HW && x < W) { g.beginPath(); g.moveTo(x, RH); g.lineTo(x, H); g.stroke(); } });
     g.setLineDash([]); g.globalAlpha = 1;
 
@@ -147,14 +146,20 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
       tr.clips.forEach(c => {
         const x1 = tx(c.start), x2 = tx(c.start + c.dur);
         if (x2 < HW || x1 > W) return;
-        const sel = store.sel.has(c.id), muted = c.muted;
-        g.fillStyle = muted ? C["--muted"] : tr.color; g.globalAlpha = muted ? 0.12 : sel ? 0.36 : 0.2;
-        roundRect(x1, y, x2 - x1, h, 5); g.fill();
+        const sel = store.sel.has(c.id), muted = c.muted, col = muted ? C["--muted"] : tr.color, w = x2 - x1, HD = 15;
+        // тіло регіону
+        g.fillStyle = col; g.globalAlpha = muted ? 0.14 : sel ? 0.5 : 0.32;
+        roundRect(x1, y, w, h, 4); g.fill();
+        // заголовок з назвою
+        g.globalAlpha = muted ? 0.5 : 1;
+        g.save(); roundRect(x1, y, w, h, 4); g.clip();
+        g.fillRect(x1, y, w, HD);
+        g.restore();
         g.globalAlpha = 1;
         const buf = buffers.get(c.buf);
-        if (buf && h > 20) {
-          const pk = peaksOf(buf), mid = y + h / 2 + 6, amp = (h - 18) / 2;
-          g.fillStyle = muted ? C["--muted"] : tr.color; g.globalAlpha = muted ? 0.5 : 0.9;
+        if (buf && h > 24) {
+          const pk = peaksOf(buf), mid = y + HD + (h - HD) / 2, amp = (h - HD - 6) / 2;
+          g.fillStyle = sel ? "#ffffff" : "rgba(255,255,255,.78)"; g.globalAlpha = muted ? 0.35 : 1;
           const from = Math.max(x1, HW), to = Math.min(x2, W), spp = buf.sampleRate / SPP;
           for (let x = Math.floor(from); x < to; x++) {
             const u = (x - x1) / store.zoom, t = c.offset + u, k = Math.floor(t * spp), k2 = Math.max(k + 1, Math.floor((t + 1 / store.zoom) * spp));
@@ -167,21 +172,21 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
         }
         // фейди
         const fiX = x1 + (c.fi || 0) * store.zoom, foX = x2 - (c.fo || 0) * store.zoom;
-        g.strokeStyle = C["--fg"]; g.globalAlpha = 0.7; g.lineWidth = 1;
-        if (c.fi) { g.beginPath(); g.moveTo(x1, y + h); g.lineTo(fiX, y + 2); g.stroke(); }
-        if (c.fo) { g.beginPath(); g.moveTo(foX, y + 2); g.lineTo(x2, y + h); g.stroke(); }
+        g.strokeStyle = "#ffffff"; g.globalAlpha = 0.8; g.lineWidth = 1.2;
+        if (c.fi) { g.beginPath(); g.moveTo(x1, y + h); g.quadraticCurveTo(x1 + (fiX - x1) * 0.15, y + HD, fiX, y + HD); g.stroke(); }
+        if (c.fo) { g.beginPath(); g.moveTo(foX, y + HD); g.quadraticCurveTo(x2 - (x2 - foX) * 0.15, y + HD, x2, y + h); g.stroke(); }
         g.globalAlpha = 1;
-        if (sel || x2 - x1 > 40) {
-          g.fillStyle = C["--fg"];
-          g.fillRect(Math.round(fiX) - 3, y, 6, 6);
-          g.fillRect(Math.round(foX) - 3, y, 6, 6);
+        if (sel || w > 40) {
+          g.fillStyle = C["--region-text"];
+          g.beginPath(); g.arc(Math.max(fiX, x1 + 4), y + HD / 2, 3, 0, Math.PI * 2); g.fill();
+          g.beginPath(); g.arc(Math.min(foX, x2 - 4), y + HD / 2, 3, 0, Math.PI * 2); g.fill();
         }
-        g.strokeStyle = sel ? C["--fg"] : muted ? C["--muted"] : tr.color; g.lineWidth = sel ? 2 : 1;
-        roundRect(x1 + 0.5, y + 0.5, x2 - x1 - 1, h - 1, 5); g.stroke();
+        g.strokeStyle = sel ? "#ffffff" : "rgba(0,0,0,.55)"; g.lineWidth = sel ? 1.6 : 1;
+        roundRect(x1 + 0.5, y + 0.5, w - 1, h - 1, 4); g.stroke();
         const lx = Math.max(x1, HW) + 8;
-        g.fillStyle = C["--fg"]; g.font = "600 11px Onest, system-ui, sans-serif"; g.textAlign = "left";
+        g.fillStyle = muted ? C["--fg"] : C["--region-text"]; g.font = "600 11px Onest, system-ui, sans-serif"; g.textAlign = "left";
         const label = (muted ? "⊘ " : "") + (c.name || tr.name) + (c.gain ? `  ${c.gain > 0 ? "+" : ""}${c.gain.toFixed(1)} dB` : "");
-        g.fillText(fitText(label, x2 - lx - 8), lx, y + 15);
+        g.fillText(fitText(label, x2 - lx - 10), lx, y + 11.5);
       });
       if (tr.auto.length > 1) {
         const a = tr.auto[0].t, z = tr.auto[tr.auto.length - 1].t;
@@ -207,18 +212,19 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
     g.fillStyle = C["--panel"]; g.fillRect(0, RH, HW, H - RH);
     p.tracks.forEach((tr, i) => {
       const y = laneY(i);
-      if (tr.id === store.selTrack) { g.fillStyle = C["--panel-2"]; g.fillRect(0, y, HW, L); }
-      g.fillStyle = tr.color; g.fillRect(0, y + 5, 4, L - 10);
+      g.fillStyle = tr.id === store.selTrack ? C["--lane-sel"] : C["--panel"]; g.fillRect(0, y, HW, L);
+      g.fillStyle = tr.color; g.fillRect(0, y, 5, L);
       g.fillStyle = C["--fg"]; g.font = "600 13px Onest, system-ui, sans-serif"; g.textAlign = "left";
       g.fillText(fitText(tr.name, HW - 28), 12, y + 21);
       if (tr.auto.length) { g.fillStyle = C["--muted"]; g.font = "500 10px 'JetBrains Mono', monospace"; g.fillText("рух", HW - 30, y + 21); }
       const by = y + 30;
       if (L >= 50) HB.forEach(bt => {
         const on = bt.act === "mute" ? tr.mute : bt.act === "solo" ? tr.solo : bt.act === "arm" ? tr.arm : tr.mode === "3d";
-        const col = bt.act === "mute" ? C["--warn"] : bt.act === "solo" ? "#c99a12" : bt.act === "arm" ? C["--rec"] : tr.color;
+        const col = bt.act === "mute" ? C["--mute"] : bt.act === "solo" ? C["--solo"] : bt.act === "arm" ? C["--rec"] : tr.color;
         roundRect(bt.x, by, bt.w, 18, 4);
-        if (on) { g.fillStyle = col; g.fill(); } else { g.strokeStyle = C["--line"]; g.lineWidth = 1; g.stroke(); }
-        g.fillStyle = on ? (bt.act === "mute" || bt.act === "arm" ? "#fff" : "#111") : C["--muted"];
+        g.fillStyle = on ? col : C["--panel-2"]; g.fill();
+        g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 1; g.stroke();
+        g.fillStyle = on ? (bt.act === "arm" ? "#fff" : C["--region-text"]) : bt.act === "arm" ? C["--rec"] : C["--muted"];
         g.font = "600 11px Onest, system-ui, sans-serif"; g.textAlign = "center";
         g.fillText(bt.act === "mode" ? (tr.mode === "3d" ? "3D" : "ST") : bt.label, bt.x + bt.w / 2, by + 13);
       });
@@ -243,23 +249,24 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
         if (bar % barEvery) continue;
         const x = tx(bar * b * 4);
         g.fillRect(x, rt + RH - 8, 1, 8);
-        g.fillText(String(bar + 1), x + 3, rt + 12);
+        g.fillText(String(bar + 1), x + 4, rt + 22);
       }
     } else {
       const { step } = timeGrid();
       for (let k = Math.max(0, Math.floor(t0 / step)); k * step <= t1; k++) {
         const t = k * step, x = tx(t), m = Math.floor(t / 60), s = t - m * 60;
         g.fillRect(x, rt + RH - 8, 1, 8);
-        g.fillText(`${m}:${(step < 1 ? s.toFixed(step < 0.1 ? 2 : 1) : String(Math.round(s))).padStart(step < 1 ? 4 : 2, "0")}`, x + 3, rt + 12);
+        g.fillText(`${m}:${(step < 1 ? s.toFixed(step < 0.1 ? 2 : 1) : String(Math.round(s))).padStart(step < 1 ? 4 : 2, "0")}`, x + 4, rt + 22);
       }
     }
     if (p.loop.on) {
-      g.fillStyle = C["--accent"];
-      g.fillRect(tx(p.loop.a), rt + RH - 5, Math.max(0, tx(p.loop.b) - tx(p.loop.a)), 4);
+      g.fillStyle = C["--cycle"]; g.globalAlpha = 0.9;
+      roundRect(tx(p.loop.a), rt + 2, Math.max(0, tx(p.loop.b) - tx(p.loop.a)), 10, 3); g.fill();
+      g.globalAlpha = 1;
     }
     p.markers.forEach(m => {
       const x = tx(m.t);
-      g.fillStyle = C["--accent"];
+      g.fillStyle = C["--marker"];
       g.beginPath(); g.moveTo(x, rt + 14); g.lineTo(x + 7, rt + 18); g.lineTo(x, rt + 22); g.fill();
       g.fillRect(x, rt + 14, 1.5, RH - 14);
       g.font = "600 10px Onest, system-ui, sans-serif"; g.fillText(fitText(m.name, 120), x + 9, rt + 25);
@@ -272,8 +279,8 @@ export function initTimeline(cv, wrap, scrollIn, hooks) {
     // плейхед
     const px = tx(pos);
     if (px >= HW && px <= W) {
-      g.fillStyle = store.recording ? C["--rec"] : C["--accent"];
-      g.fillRect(Math.round(px) - 1, rt, 2, H - rt);
+      g.fillStyle = store.recording ? C["--rec"] : C["--playhead"];
+      g.fillRect(Math.round(px), rt, 1.5, H - rt);
       g.beginPath(); g.moveTo(px - 6, rt); g.lineTo(px + 6, rt); g.lineTo(px, rt + 8); g.fill();
     }
     if (store.playing && !drag && (px > W - 30 || px < HW)) store.scroll = Math.max(0, pos - 1);

@@ -16,12 +16,13 @@ export function fmtTime(s) {
 }
 export const fmtDb = v => (v <= -48 ? "−∞ dB" : (v > 0 ? "+" : "") + v.toFixed(1) + " dB");
 
-export const COLORS = ["#e0884a", "#4aa3d8", "#b07ad6", "#4fbf8f", "#d8607a", "#d4b13c", "#6fc7c7", "#9a9df0"];
+export const COLORS = ["#4f9cf7", "#5cc96a", "#f2c24e", "#f28a3d", "#ec5a62", "#b37cf2", "#46cfd6", "#f26fb0"];
 
 const cssCache = {};
 let cssAge = 0;
 const CSS_NAMES = ["--floor", "--grid", "--wall", "--fg", "--muted", "--head", "--warn", "--accent", "--panel", "--panel-2",
-  "--bg", "--line", "--rec", "--mat-concrete", "--mat-wood", "--mat-fabric"];
+  "--bg", "--line", "--rec", "--mat-concrete", "--mat-wood", "--mat-fabric",
+  "--mute", "--solo", "--cycle", "--lane", "--lane-alt", "--lane-sel", "--region-text", "--playhead", "--marker"];
 /** Кольори теми для canvas (оновлюються раз на ~30 кадрів). */
 export function css() {
   if (cssAge-- <= 0) {

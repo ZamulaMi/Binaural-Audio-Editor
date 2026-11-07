@@ -84,7 +84,7 @@ function trackAction(tr, act) {
 /* ================= транспорт ================= */
 function syncTransport() {
   const b = $("playBtn"), p = store.p;
-  b.textContent = store.playing ? "❚❚" : "▶";
+  b.classList.toggle("is-playing", store.playing);
   b.setAttribute("aria-label", store.playing ? "Пауза" : "Відтворити");
   $("recBtn").classList.toggle("on", store.recording);
   $("recBtn").setAttribute("aria-pressed", String(store.recording));
@@ -93,7 +93,12 @@ function syncTransport() {
   $("motionBtn").setAttribute("aria-pressed", String(store.recMotion));
   if (document.activeElement !== $("bpmIn")) $("bpmIn").value = p.bpm;
 }
-$("playBtn").onclick = () => { if (store.recording) finishRecording(); else if (store.playing) pause(); else play(store.playhead); };
+let playOrigin = 0;
+$("playBtn").onclick = () => { if (store.recording) finishRecording(); else if (store.playing) pause(); else { playOrigin = store.playhead; play(store.playhead); } };
+$("stopBtn").onclick = () => {
+  if (store.recording) { finishRecording(); return; }
+  if (store.playing) { pause(); seek(playOrigin); } else seek(0);
+};
 $("homeBtn").onclick = () => { if (!store.recording) seek(store.p.loop.on ? store.p.loop.a : 0); };
 $("recBtn").onclick = () => toggleRecord();
 $("metroBtn").onclick = () => { store.p.metro = !store.p.metro; markDirty(); syncTransport(); };
