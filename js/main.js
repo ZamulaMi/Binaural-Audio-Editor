@@ -1,5 +1,5 @@
 import { $, esc, uid, clamp, fmtTime, fmtDb, COLORS } from "./util.js";
-import { store, buffers, newProject, addTrack, findTrack, checkpoint, markDirty, onChange, notify, undo, redo, setProject } from "./state.js";
+import { store, buffers, newProject, addTrack, findTrack, checkpoint, markDirty, onChange, notify, undo, redo, setProject, selected, selectOnly, normalizeProject } from "./state.js";
 import { ROOMS, MOTIONS, params, describe, relAz, bounds, maxHeight } from "./spatial.js";
 import { eng, ensureCtx, now, play, pause, seek, tick, liveStatic, liveAll, setRoomLive, setWetLive, setMasterLive,
   resetForProject, addTrackLive, removeTrackLive, trackPeak, masterPeaks, renderMix, reschedule } from "./engine.js";
@@ -19,9 +19,67 @@ const lsSet = (k, v) => { try { if (lastStorage) lastStorage.setItem(k, v); } ca
 /* ================= сцена й таймлайн ================= */
 const stage = initStage($("cv"), $("cbox"));
 const timeline = initTimeline($("tl"), $("tlwrap"), $("tlScroll"), {
-  renameTrack: tr => { const el = $("nm" + tr.id); if (el) { el.focus(); el.select(); } },
-  dropFiles: (files, tr, at) => addFiles(files, tr, at)
+  dropFiles: (files, tr, at) => addFiles(files, tr, at),
+  trackAction: (tr, act) => trackAction(tr, act),
+  contextMenu: (items, x, y) => openContextMenu(items, x, y),
+  editText: (x, y, value, cb) => editText(x, y, value, cb),
+  closeMenus: () => closeMenus(),
+  newTrack: () => newEmptyTrack(),
+  trackAdded: tr => addTrackLive(tr),
+  status: s => setStatus(s)
 });
+
+/* ================= контекстне меню й редагування підписів ================= */
+const ctx = $("ctx");
+function openContextMenu(items, x, y) {
+  ctx.innerHTML = items.map((it, i) => it === "-" ? "<hr>" :
+    `<button data-i="${i}" ${it.disabled ? "disabled" : ""} class="${it.danger ? "danger" : ""}"><span>${esc(it.label)}</span>${it.kbd ? `<kbd>${esc(it.kbd)}</kbd>` : ""}</button>`).join("");
+  ctx.hidden = false;
+  const r = ctx.getBoundingClientRect();
+  ctx.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + "px";
+  ctx.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + "px";
+  ctx.onclick = e => {
+    const b = e.target.closest("button[data-i]");
+    if (!b) return;
+    closeMenus();
+    items[+b.dataset.i].run();
+  };
+}
+function closeMenus() { ctx.hidden = true; $("fileMenu").open = false; }
+document.addEventListener("pointerdown", e => { if (!ctx.hidden && !ctx.contains(e.target)) ctx.hidden = true; }, true);
+const inl = $("inlineEdit");
+let inlCb = null;
+function editText(x, y, value, cb) {
+  inlCb = cb;
+  inl.value = value;
+  inl.hidden = false;
+  inl.style.left = Math.max(8, Math.min(x - 20, innerWidth - 230)) + "px";
+  inl.style.top = Math.max(8, Math.min(y - 16, innerHeight - 40)) + "px";
+  inl.focus(); inl.select();
+}
+function commitInline(ok) {
+  if (inl.hidden) return;
+  inl.hidden = true;
+  const cb = inlCb; inlCb = null;
+  if (ok && cb && inl.value.trim()) cb(inl.value.trim());
+}
+inl.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); commitInline(true); }
+  else if (e.key === "Escape") { e.preventDefault(); commitInline(false); }
+  e.stopPropagation();
+});
+inl.addEventListener("blur", () => commitInline(true));
+
+/* ================= кнопки доріжки (мікшер і таймлайн) ================= */
+function trackAction(tr, act) {
+  checkpoint();
+  if (act === "mode") { tr.mode = tr.mode === "3d" ? "stereo" : "3d"; liveStatic(tr); }
+  else if (act === "mute") { tr.mute = !tr.mute; liveStatic(tr); }
+  else if (act === "solo") { tr.solo = !tr.solo; liveAll(); }
+  else if (act === "arm") { const v = !tr.arm; store.p.tracks.forEach(t => (t.arm = false)); tr.arm = v; }
+  store.selTrack = tr.id;
+  renderMixer(); renderInspector();
+}
 
 /* ================= транспорт ================= */
 function syncTransport() {
@@ -101,9 +159,9 @@ async function finishRecording() {
   let tr = findTrack(recInfo && recInfo.track);
   if (!tr) tr = addTrack({ name: "Запис", arm: true });
   const stamp = new Date().toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
-  const clip = { id: uid(), buf: bufId, start, offset, dur: Math.max(0.05, r.buffer.duration - offset), name: "Запис " + stamp };
+  const clip = { id: uid(), buf: bufId, start, offset, dur: Math.max(0.05, r.buffer.duration - offset), name: "Запис " + stamp, gain: 0, fi: 0, fo: 0, muted: false };
   tr.clips.push(clip);
-  store.selClip = clip.id; store.selTrack = tr.id;
+  selectOnly(clip.id); store.selTrack = tr.id;
   notify("structure");
   setStatus(`Записано ${clip.dur.toFixed(1)} с з «${r.label}». Компенсація затримки: ${Math.round(r.latency * 1000 + (store.p.latencyMs || 0))} мс.`);
 }
@@ -282,15 +340,9 @@ $("strips").addEventListener("click", e => {
     notify("structure");
     return;
   }
-  if (act) {
-    checkpoint();
-    if (act === "mode") { tr.mode = tr.mode === "3d" ? "stereo" : "3d"; liveStatic(tr); }
-    else if (act === "mute") { tr.mute = !tr.mute; liveStatic(tr); }
-    else if (act === "solo") { tr.solo = !tr.solo; liveAll(); }
-    else if (act === "arm") { const v = !tr.arm; store.p.tracks.forEach(t => (t.arm = false)); tr.arm = v; }
-  }
+  if (act) { trackAction(tr, act); return; }
   if (store.selTrack !== tr.id) { store.selTrack = tr.id; renderInspector(); }
-  if (act) renderMixer(); else markSelected();
+  markSelected();
 });
 function newEmptyTrack() {
   checkpoint();
@@ -320,9 +372,9 @@ async function addFiles(files, intoTrack = null, at = null) {
         const k = store.p.tracks.length, a = (k * 47 % 300 - 150) * Math.PI / 180;
         tr = addTrack({ name, x: 2.5 * Math.sin(a), z: -2.5 * Math.cos(a) });
       }
-      const clip = { id: uid(), buf: id, start: at !== null ? at : store.playhead, offset: 0, dur: buf.duration, name };
+      const clip = { id: uid(), buf: id, start: at !== null ? at : store.playhead, offset: 0, dur: buf.duration, name, gain: 0, fi: 0, fo: 0, muted: false };
       tr.clips.push(clip);
-      store.selTrack = tr.id; store.selClip = clip.id;
+      store.selTrack = tr.id; selectOnly(clip.id);
       added++;
       setStatus(`Додано «${name}» (${buf.duration.toFixed(1)} с, ${buf.numberOfChannels === 2 ? "стерео → моно-джерело в 3D" : "моно"}).`);
     } catch (err) { setStatus(`Не вдалося прочитати «${f.name}». Підтримуються WAV, MP3, OGG, FLAC, M4A.`); }
@@ -335,13 +387,44 @@ app.addEventListener("dragover", e => { e.preventDefault(); });
 app.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]); });
 
 /* ================= таймлайн: панель ================= */
-$("splitBtn").onclick = () => { if (!timeline.split()) setStatus("Поставте плейхед усередину кліпу, щоб розрізати."); };
-$("dupBtn").onclick = () => { if (!timeline.duplicate()) setStatus("Виберіть кліп на таймлайні."); };
-$("delClipBtn").onclick = () => { if (!timeline.remove()) setStatus("Виберіть кліп на таймлайні."); };
-$("snapIn").onchange = e => (store.snap = e.target.checked);
+const need = (ok, msg) => { if (!ok) setStatus(msg); };
+$("splitBtn").onclick = () => need(timeline.split(), "Поставте плейхед усередину кліпу, щоб розрізати.");
+$("dupBtn").onclick = () => need(timeline.duplicate(), "Виберіть кліп на таймлайні.");
+$("delClipBtn").onclick = () => need(timeline.remove(), "Виберіть кліп на таймлайні.");
+$("markerBtn").onclick = () => timeline.addMarker();
+$("snapSel").onchange = e => { store.snapRes = e.target.value; };
+$("rulerSel").onchange = e => { store.rulerMode = e.target.value; };
 $("zoomIn").onclick = () => timeline.zoomBy(1.5);
 $("zoomOut").onclick = () => timeline.zoomBy(1 / 1.5);
 $("zoomFit").onclick = () => timeline.fit();
+$("laneIn").onclick = () => timeline.laneZoom(1.25);
+$("laneOut").onclick = () => timeline.laneZoom(0.8);
+
+/* ---- властивості вибраних кліпів ---- */
+function renderClipBar() {
+  const list = selected(), el = $("clipbar");
+  if (!list.length) { el.innerHTML = `<span class="hint">Кліп не вибрано. Клік — вибір, Shift/Ctrl — кілька, рамка по порожньому місцю — групою.</span>`; return; }
+  const c = list[0].c, many = list.length > 1;
+  el.innerHTML = `
+    <b class="cb-title">${many ? "Вибрано кліпів: " + list.length : esc(c.name || list[0].t.name)}</b>
+    ${many ? "" : `<label>Початок <input type="number" id="cbStart" step="0.01" min="0" value="${c.start.toFixed(3)}"> с</label>
+    <label>Довжина <span class="mono">${c.dur.toFixed(2)} с</span></label>`}
+    <label>Гейн <input type="range" id="cbGain" min="-24" max="24" step="0.1" value="${c.gain || 0}"><output id="cbGainO">${(c.gain || 0).toFixed(1)} dB</output></label>
+    <label>Фейд ↗ <input type="number" id="cbFi" step="0.05" min="0" value="${(c.fi || 0).toFixed(2)}"> с</label>
+    <label>Фейд ↘ <input type="number" id="cbFo" step="0.05" min="0" value="${(c.fo || 0).toFixed(2)}"> с</label>
+    <label class="check small"><input type="checkbox" id="cbMute" ${c.muted ? "checked" : ""}> Вимкнений</label>
+    <button class="btn small" id="cbNorm">Нормалізувати</button>
+    <button class="btn small" id="cbRev">Реверс</button>`;
+  const each = f => { list.forEach(({ c }) => f(c)); reschedule(); };
+  if (!many) $("cbStart").onchange = e => { checkpoint(); c.start = Math.max(0, +e.target.value || 0); reschedule(); notify("structure"); };
+  $("cbGain").oninput = e => { checkpoint(false); const v = +e.target.value; $("cbGainO").textContent = v.toFixed(1) + " dB"; list.forEach(({ c }) => (c.gain = v)); };
+  $("cbGain").onchange = () => reschedule();
+  $("cbFi").onchange = e => { checkpoint(); each(c => (c.fi = clamp(+e.target.value || 0, 0, c.dur - c.fo))); notify("structure"); };
+  $("cbFo").onchange = e => { checkpoint(); each(c => (c.fo = clamp(+e.target.value || 0, 0, c.dur - c.fi))); notify("structure"); };
+  $("cbMute").onchange = e => { checkpoint(); each(c => (c.muted = e.target.checked)); notify("structure"); };
+  $("cbNorm").onclick = () => timeline.normalize();
+  $("cbRev").onclick = () => timeline.reverse();
+}
 
 /* ================= проєкт: збереження ================= */
 function syncSaveState() {
@@ -376,9 +459,8 @@ async function loadProject(p, bufs, id) {
   if (store.p && store.dirty) await saveToLibrary(true);
   if (store.playing) pause();
   bufs.forEach((b, k) => buffers.set(k, b));
+  normalizeProject(p);
   ensureDemoBuffers(p);
-  p.loop = p.loop || { on: false, a: 0, b: 8 };
-  p.tracks.forEach(t => { t.auto = t.auto || []; t.clips = t.clips || []; t.motion = t.motion || { type: "none", period: 8 }; });
   setProject(p, id);
   store.savedAt = id ? new Date() : null;
   if (id) lsSet("bae:last", id);
@@ -475,35 +557,115 @@ $("dlg").addEventListener("click", async e => {
 });
 
 /* ================= клавіатура ================= */
+// Кнопки й повзунки, натиснуті мишею, не тримають фокус — інакше Пробіл «натискав» би їх удруге.
+document.addEventListener("pointerup", e => {
+  const el = e.target.closest("button, summary, input[type=range], input[type=checkbox]");
+  if (el && e.pointerType) setTimeout(() => el.blur(), 0);
+}, true);
+const HOTKEYS = [
+  ["Транспорт", [
+    ["Пробіл", "Відтворення / пауза"], ["R", "Запис з мікрофона"], ["Home / End", "На початок / в кінець проєкту"],
+    ["← / →", "Плейхед на крок сітки (Shift — на такт)"], ["[ / ]", "Попередній / наступний маркер"],
+    ["L", "Цикл увімк./вимк."], ["I / O", "Початок / кінець циклу в позиції плейхеда"], ["K", "Метроном"]]],
+  ["Редагування", [
+    ["S", "Розрізати в позиції плейхеда"], ["Delete", "Видалити вибрані кліпи"], ["Ctrl C / X / V", "Копіювати / вирізати / вставити"],
+    ["Ctrl D", "Дублювати"], ["Ctrl A", "Виділити всі кліпи"], ["Esc", "Зняти виділення"],
+    ["← / → з кліпами", "Зсунути на крок сітки (Alt — на 10 мс)"], ["U", "Вимкнути / увімкнути кліп"],
+    ["M", "Додати маркер"], ["G", "Прив'язка до сітки увімк./вимк."], ["Ctrl Z / Ctrl Shift Z", "Скасувати / повторити"]]],
+  ["Вигляд і доріжки", [
+    ["= / −", "Масштаб часу"], ["Z", "Вмістити весь проєкт"], ["↑ / ↓", "Попередня / наступна доріжка"],
+    ["N", "Нова доріжка"], ["Ctrl + коліщатко", "Масштаб під курсором"], ["Alt + коліщатко", "Висота доріжок"]]],
+  ["Проєкт", [["Ctrl S", "Зберегти"], ["Ctrl O", "Бібліотека проєктів"], ["Ctrl E", "Експорт бінаурального WAV"], ["?", "Ця довідка"]]],
+  ["Миша на таймлайні", [
+    ["Shift / Ctrl + клік", "Додати / перемкнути вибір"], ["Рамка по порожньому", "Вибір групою"], ["Ctrl + тягнути", "Копія кліпу"],
+    ["Тягнути край", "Обрізати"], ["Квадратики вгорі", "Фейди"], ["Alt під час дії", "Без прив'язки"],
+    ["Shift + тягнути по лінійці", "Межі циклу"], ["Правий клік", "Контекстне меню"], ["Подвійний клік", "Перейменувати"]]]
+];
+$("helpList").innerHTML = HOTKEYS.map(([h, rows]) => `<section><h3>${h}</h3><dl>${rows.map(([k, v]) => `<dt><kbd>${esc(k)}</kbd></dt><dd>${esc(v)}</dd>`).join("")}</dl></section>`).join("");
+const toggleHelp = v => ($("help").hidden = v === undefined ? !$("help").hidden : !v);
+$("helpBtn").onclick = () => toggleHelp(true);
+$("helpClose").onclick = () => toggleHelp(false);
+$("help").addEventListener("click", e => { if (e.target.id === "help") toggleHelp(false); });
+
+function stepPlayhead(dir, bar) {
+  const b = 60 / store.p.bpm, step = bar ? b * 4 : timeline.snapStep() || b;
+  const t = now(), target = dir > 0 ? Math.floor(t / step + 1e-6) * step + step : Math.ceil(t / step - 1e-6) * step - step;
+  seek(Math.max(0, target));
+  timeline.revealPlayhead();
+}
 document.addEventListener("keydown", e => {
-  const typing = e.target.closest("input:not([type=range]):not([type=checkbox]),select,textarea");
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.code === "KeyS") { e.preventDefault(); saveToLibrary(); return; }
-  if (typing) return;
-  if (mod && e.code === "KeyZ") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
-  if (mod && e.code === "KeyY") { e.preventDefault(); redo(); return; }
-  if (mod && e.code === "KeyD") { e.preventDefault(); timeline.duplicate(); return; }
-  if (mod) return;
-  if (e.code === "Space") { e.preventDefault(); $("playBtn").click(); }
-  else if (e.code === "Home" || e.code === "Enter") { e.preventDefault(); $("homeBtn").click(); }
-  else if (e.code === "KeyR") toggleRecord();
-  else if (e.code === "KeyS") timeline.split();
-  else if (e.code === "KeyL") $("loopBtn").click();
-  else if (e.code === "KeyM") $("metroBtn").click();
-  else if (e.code === "Delete" || e.code === "Backspace") { if (timeline.remove()) e.preventDefault(); }
-});
+  if (e.isComposing || e.repeat && /^(KeyR|KeyS|KeyM|KeyN|Space)$/.test(e.code)) return;
+  const el = e.target;
+  const textual = el.closest && el.closest("input:not([type=range]):not([type=checkbox]),select,textarea");
+  const mod = e.ctrlKey || e.metaKey, code = e.code;
+  const run = f => { e.preventDefault(); e.stopPropagation(); f(); };
+  if (mod && code === "KeyS") return run(() => saveToLibrary());
+  if (code === "Escape") {
+    if (!$("help").hidden) return run(() => toggleHelp(false));
+    if (!$("dlg").hidden) return run(() => ($("dlg").hidden = true));
+    if (!ctx.hidden || $("fileMenu").open) return run(closeMenus);
+    if (!textual) return run(() => timeline.deselect());
+  }
+  if (textual) return;
+  // кнопка/повзунок з фокусом не повинні отримати цей Пробіл чи Enter
+  if (el !== document.body && /^(Space|Enter)$/.test(code)) el.blur && el.blur();
+  if (mod) {
+    if (code === "KeyZ") return run(() => (e.shiftKey ? redo() : undo()));
+    if (code === "KeyY") return run(redo);
+    if (code === "KeyD") return run(() => need(timeline.duplicate(), "Виберіть кліп."));
+    if (code === "KeyC") return run(() => need(timeline.copy(), "Виберіть кліп."));
+    if (code === "KeyX") return run(() => need(timeline.cut(), "Виберіть кліп."));
+    if (code === "KeyV") return run(() => need(timeline.paste(), "Буфер обміну порожній."));
+    if (code === "KeyA") return run(timeline.selectAll);
+    if (code === "KeyO") return run(openLibrary);
+    if (code === "KeyE") return run(exportMix);
+    return;
+  }
+  if (e.altKey && !/^Arrow/.test(code)) return;
+  switch (code) {
+    case "Space": return run(() => $("playBtn").click());
+    case "Home": return run(() => { seek(0); timeline.revealPlayhead(); });
+    case "End": return run(() => { seek(Math.max(0, projectEndTime())); timeline.revealPlayhead(); });
+    case "KeyR": return run(toggleRecord);
+    case "KeyS": return run(() => need(timeline.split(), "Поставте плейхед усередину кліпу, щоб розрізати."));
+    case "Delete": case "Backspace": return run(() => timeline.remove());
+    case "KeyL": return run(() => $("loopBtn").click());
+    case "KeyK": return run(() => $("metroBtn").click());
+    case "KeyI": return run(() => timeline.setLoopEdge("a"));
+    case "KeyO": return run(() => timeline.setLoopEdge("b"));
+    case "KeyM": return run(() => timeline.addMarker());
+    case "KeyU": return run(() => need(timeline.toggleMute(), "Виберіть кліп."));
+    case "KeyG": return run(() => { store.snapRes = store.snapRes === "off" ? "1/16" : "off"; $("snapSel").value = store.snapRes; setStatus(store.snapRes === "off" ? "Прив'язку вимкнено." : "Прив'язка: 1/16."); });
+    case "KeyN": return run(newEmptyTrack);
+    case "KeyZ": return run(timeline.fit);
+    case "Equal": case "NumpadAdd": return run(() => timeline.zoomBy(1.5));
+    case "Minus": case "NumpadSubtract": return run(() => timeline.zoomBy(1 / 1.5));
+    case "BracketLeft": return run(() => { timeline.gotoMarker(-1); timeline.revealPlayhead(); });
+    case "BracketRight": return run(() => { timeline.gotoMarker(1); timeline.revealPlayhead(); });
+    case "ArrowUp": return run(() => timeline.selectTrackDelta(-1));
+    case "ArrowDown": return run(() => timeline.selectTrackDelta(1));
+    case "ArrowLeft": case "ArrowRight": {
+      const dir = code === "ArrowLeft" ? -1 : 1;
+      return run(() => { if (!timeline.nudge(dir, e.altKey)) stepPlayhead(dir, e.shiftKey); });
+    }
+    case "Slash": if (e.shiftKey) return run(() => toggleHelp()); return;
+    case "F1": return run(() => toggleHelp());
+  }
+}, true);
+const projectEndTime = () => store.p.tracks.reduce((m, t) => t.clips.reduce((mm, c) => Math.max(mm, c.start + c.dur), m), 0);
 
 /* ================= події стану ================= */
 onChange(kind => {
   if (kind === "load") { resetForProject(); renderAll(); }
-  else if (kind === "structure") { timeline.resize(); renderMixer(); renderInspector(); }
-  else if (kind === "select") { markSelected(); renderInspector(); }
+  else if (kind === "structure") { timeline.resize(); renderMixer(); renderInspector(); renderClipBar(); }
+  else if (kind === "select") { markSelected(); renderInspector(); renderClipBar(); }
   else if (kind === "geometry") syncInspectorGeometry();
   else if (kind === "transport") syncTransport();
   if (kind === "dirty" || kind === "load") syncSaveState();
 });
 function renderAll() {
-  syncRoomUI(); renderMixer(); renderInspector(); syncTransport(); syncSaveState(); timeline.resize();
+  syncRoomUI(); renderMixer(); renderInspector(); renderClipBar(); syncTransport(); syncSaveState(); timeline.resize();
+  $("snapSel").value = store.snapRes; $("rulerSel").value = store.rulerMode;
 }
 
 /* ================= кадр ================= */

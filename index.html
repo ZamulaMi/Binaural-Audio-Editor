@@ -57,6 +57,7 @@
     <button class="btn toggle" id="motionBtn" aria-pressed="false" title="Записувати рух джерел під час відтворення">Рух ●</button>
     <div class="inmeter" title="Рівень входу мікрофона"><i id="inMeter"></i></div>
     <span class="phones">🎧 Слухайте в навушниках</span>
+    <button class="btn small" id="helpBtn" title="Гарячі клавіші (?)">Клавіші ?</button>
   </div>
   <div class="status" id="status" role="status"></div>
 
@@ -102,20 +103,39 @@
     <div class="tl-head">
       <h2>Часова шкала</h2>
       <div class="tl-tools">
-        <button class="btn small" id="addTrackBtn">＋ Доріжка</button>
-        <label class="btn small" for="fileIn">＋ Аудіо</label>
-        <input type="file" id="fileIn" accept="audio/*" multiple class="sr">
-        <input type="file" id="projIn" accept=".zip,application/zip" class="sr">
-        <button class="btn small" id="splitBtn" title="Розрізати кліп у позиції плейхеда (S)">Розрізати</button>
-        <button class="btn small" id="dupBtn" title="Дублювати кліп (Ctrl D)">Дублювати</button>
-        <button class="btn small" id="delClipBtn" title="Видалити кліп (Delete)">Видалити кліп</button>
-        <label class="check small"><input type="checkbox" id="snapIn" checked> Прив'язка до сітки</label>
-        <span class="zoom"><button class="btn small" id="zoomOut" aria-label="Зменшити масштаб">−</button><button class="btn small" id="zoomFit">Вмістити</button><button class="btn small" id="zoomIn" aria-label="Збільшити масштаб">+</button></span>
+        <span class="grp">
+          <button class="btn small" id="addTrackBtn" title="Нова доріжка (N)">＋ Доріжка</button>
+          <label class="btn small" for="fileIn">＋ Аудіо</label>
+          <input type="file" id="fileIn" accept="audio/*" multiple class="sr">
+          <input type="file" id="projIn" accept=".zip,application/zip" class="sr">
+        </span>
+        <span class="grp">
+          <button class="btn small" id="splitBtn" title="Розрізати в позиції плейхеда (S)">Розрізати</button>
+          <button class="btn small" id="dupBtn" title="Дублювати (Ctrl D)">Дублювати</button>
+          <button class="btn small" id="delClipBtn" title="Видалити (Delete)">Видалити</button>
+          <button class="btn small" id="markerBtn" title="Маркер у позиції плейхеда (M)">◆ Маркер</button>
+        </span>
+        <span class="grp">
+          <label class="lbl" for="snapSel">Сітка</label>
+          <select id="snapSel" class="small" title="Прив'язка (G — вимк./увімк.)">
+            <option value="bar">Такт</option><option value="beat">Доля</option><option value="1/8">1/8</option>
+            <option value="1/16">1/16</option><option value="0.1s">0,1 с</option><option value="off">Вимк.</option>
+          </select>
+          <select id="rulerSel" class="small" aria-label="Шкала"><option value="bars">Такти</option><option value="time">Хв:сек</option></select>
+        </span>
+        <span class="grp zoom">
+          <button class="btn small" id="laneOut" aria-label="Нижчі доріжки" title="Нижчі доріжки">↕−</button>
+          <button class="btn small" id="laneIn" aria-label="Вищі доріжки" title="Вищі доріжки">↕+</button>
+          <button class="btn small" id="zoomOut" aria-label="Зменшити масштаб" title="Зменшити (−)">−</button>
+          <button class="btn small" id="zoomFit" title="Вмістити проєкт (Z)">Вмістити</button>
+          <button class="btn small" id="zoomIn" aria-label="Збільшити масштаб" title="Збільшити (=)">+</button>
+        </span>
       </div>
     </div>
+    <div class="clipbar" id="clipbar"></div>
     <div class="tlwrap" id="tlwrap"><canvas id="tl"></canvas></div>
     <input type="range" id="tlScroll" class="tlscroll" min="0" max="60" step="0.01" value="0" aria-label="Прокрутка часової шкали">
-    <div class="hint">Тягніть кліпи (між доріжками теж), краї — обрізка. Клік по лінійці — перехід, Shift + тягнути по лінійці — межі циклу. Ctrl + коліщатко — масштаб. Ctrl Z / Ctrl Shift Z — скасувати / повторити.</div>
+    <div class="hint">Правий клік — меню дій. Краї кліпу — обрізка, квадратики вгорі — фейди, Ctrl + тягнути — копія. Усі клавіші — кнопка «Клавіші ?» або <kbd>?</kbd>.</div>
   </section>
 
   <section class="card mixer" aria-label="Мікшер">
@@ -132,6 +152,17 @@
     <div class="dlg-head"><h2 id="dlgTitle">Бібліотека проєктів</h2><button class="btn small" id="dlgClose">Закрити</button></div>
     <div class="hint">Проєкти зберігаються в цьому браузері разом з аудіо. Щоб перенести на інший комп'ютер — «Зберегти проєкт у файл».</div>
     <div id="dlgList" class="dlg-list"></div>
+  </div>
+</div>
+
+<div class="ctxmenu card" id="ctx" role="menu" hidden></div>
+<input id="inlineEdit" class="inline-edit" aria-label="Нова назва" hidden>
+
+<div class="overlay" id="help" hidden>
+  <div class="dialog card wide" role="dialog" aria-labelledby="helpTitle">
+    <div class="dlg-head"><h2 id="helpTitle">Гарячі клавіші</h2><button class="btn small" id="helpClose">Закрити</button></div>
+    <div class="hint">Клавіші працюють за будь-якої розкладки (українська чи англійська). У полях введення тексту вони вимкнені.</div>
+    <div class="help-list" id="helpList"></div>
   </div>
 </div>
 

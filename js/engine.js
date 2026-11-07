@@ -144,20 +144,25 @@ function setListener(c, mode, when, L) {
 /** Ставить у чергу всі кліпи доріжки, починаючи з позиції `from` (сек проєкту) у момент `when0` (час контексту). */
 function scheduleClips(c, n, tr, from, when0) {
   for (const cl of tr.clips) {
+    if (cl.muted) continue;
     const end = cl.start + cl.dur;
     if (end <= from + 0.001) continue;
     const buf = buffers.get(cl.buf);
     if (!buf) continue;
-    const delay = Math.max(0, cl.start - from), off = cl.offset + Math.max(0, from - cl.start);
-    const dur = Math.min(end - Math.max(from, cl.start), buf.duration - off);
-    if (dur <= 0.002) continue;
-    const at = when0 + delay, fd = Math.min(0.004, dur / 4);
+    const u0 = Math.max(0, from - cl.start); // позиція всередині кліпу
+    const len = Math.min(cl.dur, buf.duration - cl.offset);
+    if (len - u0 <= 0.002) continue;
+    const at = when0 + Math.max(0, cl.start - from);
+    const G = dbToGain(cl.gain || 0);
+    const fi = Math.max(0.004, Math.min(cl.fi || 0, len)), fo = Math.max(0.004, Math.min(cl.fo || 0, len));
+    const env = u => G * Math.max(0, Math.min(1, u / fi, (len - u) / fo));
     const s = c.createBufferSource(), g = c.createGain();
     s.buffer = buf;
-    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(1, at + fd);
-    g.gain.setValueAtTime(1, at + dur - fd); g.gain.linearRampToValueAtTime(0, at + dur);
+    g.gain.setValueAtTime(env(u0), at);
+    [fi, len - fo, len].filter(b => b > u0).sort((a, b) => a - b)
+      .forEach(b => g.gain.linearRampToValueAtTime(env(b), at + (b - u0)));
     s.connect(g).connect(n.fader);
-    s.start(at, off, dur);
+    s.start(at, cl.offset + u0, len - u0);
     n.all.push(s, g); n.srcs.push(s);
   }
 }

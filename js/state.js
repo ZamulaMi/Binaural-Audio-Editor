@@ -7,7 +7,8 @@ export const buffers = new Map();
 export const store = {
   p: null,
   selTrack: null,
-  selClip: null,
+  sel: new Set(), // вибрані кліпи
+  clipboard: null,
   playhead: 0,
   playing: false,
   recording: false,
@@ -16,7 +17,9 @@ export const store = {
   mat: "concrete",
   zoom: 40, // пікселів на секунду
   scroll: 0, // секунд
-  snap: true,
+  snapRes: "1/16", // bar | beat | 1/8 | 1/16 | 0.1s | off
+  rulerMode: "bars", // bars | time
+  laneH: 64,
   dirty: false,
   projectId: null,
   savedAt: null
@@ -28,7 +31,7 @@ export function newProject(name = "Новий проєкт") {
     room: "room", wet: 0.16, early: true,
     listener: { x: 0, z: 0, yaw: 0 },
     obstacles: [], tracks: [],
-    loop: { on: false, a: 0, b: 8 },
+    loop: { on: false, a: 0, b: 8 }, markers: [],
     masterDb: 0, latencyMs: 0
   };
 }
@@ -81,7 +84,7 @@ export function checkpoint(force = true) {
 export function markDirty() { if (!store.dirty) { store.dirty = true; notify("dirty"); } }
 function fixSelection() {
   if (!findTrack(store.selTrack)) store.selTrack = store.p.tracks[0] ? store.p.tracks[0].id : null;
-  if (store.selClip && !findClip(store.selClip)) store.selClip = null;
+  [...store.sel].forEach(id => { if (!findClip(id)) store.sel.delete(id); });
 }
 export function undo() {
   if (!undoStack.length) return false;
@@ -101,6 +104,30 @@ export function setProject(p, id = null) {
   store.p = p; store.projectId = id;
   undoStack.length = 0; redoStack.length = 0;
   store.selTrack = p.tracks[0] ? p.tracks[0].id : null;
-  store.selClip = null; store.playhead = 0; store.scroll = 0; store.dirty = false;
+  store.sel.clear(); store.playhead = 0; store.scroll = 0; store.dirty = false;
   notify("load");
+}
+
+/** Вибрані кліпи разом з доріжками. */
+export function selected() {
+  const out = [];
+  for (const t of store.p.tracks) for (const c of t.clips) if (store.sel.has(c.id)) out.push({ t, c });
+  return out;
+}
+export function selectOnly(id) { store.sel.clear(); if (id) store.sel.add(id); }
+
+/** Доповнює поля, яких могло не бути у файлах старіших версій. */
+export function normalizeProject(p) {
+  p.loop = p.loop || { on: false, a: 0, b: 8 };
+  p.markers = p.markers || [];
+  p.tracks.forEach(t => {
+    t.auto = t.auto || []; t.clips = t.clips || []; t.motion = t.motion || { type: "none", period: 8 };
+    t.clips.forEach(c => {
+      if (c.gain === undefined) c.gain = 0;
+      if (c.fi === undefined) c.fi = 0;
+      if (c.fo === undefined) c.fo = 0;
+      if (c.muted === undefined) c.muted = false;
+    });
+  });
+  return p;
 }
